@@ -1,5 +1,6 @@
 from langgraph.graph import END, StateGraph
 
+from ..config import get_settings
 from .nodes.execute import execute
 from .nodes.explain import explain
 from .nodes.generate import generate
@@ -15,13 +16,23 @@ def _after_understand(state: AgentState) -> str:
 
 
 def _after_validate(state: AgentState) -> str:
-    if state.get("error"):
-        return "explain"
-    return "execute"
+    if not state.get("error"):
+        return "execute"
+    return _maybe_retry(state)
 
 
 def _after_execute(state: AgentState) -> str:
-    return "explain"
+    if not state.get("error"):
+        return "explain"
+    return _maybe_retry(state)
+
+
+def _maybe_retry(state: AgentState) -> str:
+    settings = get_settings()
+    if state.get("attempt_count", 1) >= settings.max_retries:
+        return "explain"
+    state["attempt_count"] = state.get("attempt_count", 1) + 1
+    return "retry"
 
 
 def build_graph():
@@ -38,9 +49,15 @@ def build_graph():
     )
     g.add_edge("generate", "validate")
     g.add_conditional_edges(
-        "validate", _after_validate, {"execute": "execute", "explain": "explain"}
+        "validate",
+        _after_validate,
+        {"execute": "execute", "retry": "generate", "explain": "explain"},
     )
-    g.add_conditional_edges("execute", _after_execute, {"explain": "explain"})
+    g.add_conditional_edges(
+        "execute",
+        _after_execute,
+        {"explain": "explain", "retry": "generate"},
+    )
     g.add_edge("explain", END)
 
     return g.compile()

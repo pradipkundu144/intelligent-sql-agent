@@ -4,14 +4,36 @@ from ...llm import chat
 from ..state import AgentState
 
 REFUSAL_OUT_OF_SCOPE = (
-    "I can only answer questions about the customer, product, and order data. "
-    "Try asking about revenue, orders, customers, or products."
+    "That request is outside what I can answer. {reason}"
+    "I can only answer questions about the customer, product, and order data — "
+    "try asking about revenue, orders, customers, or products."
 )
 
 REFUSAL_DESTRUCTIVE = (
-    "That request was blocked because I can only read data, not modify it. "
+    "That request was blocked. {reason}"
+    "I can only read data, not modify it. "
     "Try asking a question about the customer, product, or order data instead."
 )
+
+REFUSAL_SYSTEM_ACCESS = (
+    "That request was blocked. {reason}"
+    "I can only access the customer, product, and order data — "
+    "not internal database or system tables."
+)
+
+REFUSAL_DATA_UNAVAILABLE = (
+    "That data isn't in our records. {reason}"
+    "I can only work with the columns present in the customer, product, and "
+    "order tables — try asking a question that fits."
+)
+
+
+def _format_refusal(template: str, block_reason: str | None) -> str:
+    reason = (block_reason or "").strip()
+    if reason and not reason.endswith((".", "!", "?")):
+        reason += "."
+    prefix = f"{reason} " if reason else ""
+    return template.format(reason=prefix)
 
 PROMPT = """You are a business analyst explaining the result of a SQL query to a user
 who does not read SQL. Speak plainly, one or two sentences, no jargon, no SQL, no code.
@@ -46,9 +68,13 @@ async def explain(state: AgentState) -> AgentState:
         if state.get("error"):
             state["answer"] = _friendly_error(state["error"])
         elif state.get("intent_type") == "destructive":
-            state["answer"] = REFUSAL_DESTRUCTIVE
+            state["answer"] = _format_refusal(REFUSAL_DESTRUCTIVE, state.get("block_reason"))
+        elif state.get("intent_type") == "system_access":
+            state["answer"] = _format_refusal(REFUSAL_SYSTEM_ACCESS, state.get("block_reason"))
+        elif state.get("intent_type") == "data_unavailable":
+            state["answer"] = _format_refusal(REFUSAL_DATA_UNAVAILABLE, state.get("block_reason"))
         elif state.get("intent_type") == "out_of_scope" or state.get("in_scope") is False:
-            state["answer"] = REFUSAL_OUT_OF_SCOPE
+            state["answer"] = _format_refusal(REFUSAL_OUT_OF_SCOPE, state.get("block_reason"))
         else:
             rows = state.get("rows") or []
             total = state.get("total_row_count", len(rows))
@@ -76,8 +102,15 @@ async def explain(state: AgentState) -> AgentState:
 
 
 def _friendly_error(err: str) -> str:
-    if "only SELECT" in err:
+    lower = err.lower()
+    if "multi-statement" in lower:
+        return "That request was blocked because it contained multiple statements — I can only run one at a time."
+    if "only select" in lower or "not_select" in lower:
         return "That request was blocked because I can only read data, not modify it."
-    if "timeout" in err.lower():
+    if "unknown table" in lower:
+        return "That request was blocked because it referred to a table outside the business data (customers, products, orders, order_items)."
+    if "could not be parsed" in lower or "unparseable" in lower:
+        return "I built a query that wasn't valid SQL. Try rephrasing your question."
+    if "timeout" in lower or "exceeded" in lower:
         return "That query took too long to run. Try a narrower question."
     return "I couldn't build a valid query for that — could you rephrase it?"

@@ -8,6 +8,7 @@ export type Turn = {
   rows?: Row[] | null;
   totalRowCount?: number | null;
   overflow?: boolean;
+  attemptCount?: number;
   error?: string | null;
   intentType?: "query" | "destructive" | "out_of_scope" | null;
   stageTimings?: Record<string, number>;
@@ -49,6 +50,17 @@ export default function AnswerCard({ turn }: { turn: Turn }) {
       {!loading && intentType === "out_of_scope" && (
         <span className="mt-2 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
           out of scope
+        </span>
+      )}
+
+      {!loading && (turn.attemptCount ?? 1) > 1 && !error && (
+        <span className="ml-2 mt-2 inline-block rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+          refined {turn.attemptCount!}× → succeeded
+        </span>
+      )}
+      {!loading && (turn.attemptCount ?? 1) > 1 && error && (
+        <span className="ml-2 mt-2 inline-block rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+          refined {turn.attemptCount!}× → gave up
         </span>
       )}
 

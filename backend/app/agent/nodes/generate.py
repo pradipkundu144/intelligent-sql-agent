@@ -1,5 +1,6 @@
 import time
 
+from ...config import get_settings
 from ...llm import chat
 from ..prompts import SCHEMA_DDL
 from ..state import AgentState
@@ -18,20 +19,45 @@ Rules:
 - Return ONLY the SQL. No markdown, no comments, no explanation.
 
 Question: {question}
-
+{correction}
 SQL:
+"""
+
+CORRECTION_TEMPLATE = """
+IMPORTANT — a previous attempt to answer this question failed.
+Previous SQL:
+{previous_sql}
+Failure reason: {previous_error}
+Attempt {attempt} of {max_attempts}. Produce a corrected SELECT that fixes the specific problem above.
 """
 
 
 async def generate(state: AgentState) -> AgentState:
     started = time.perf_counter()
     try:
-        raw = await chat(PROMPT.format(schema=SCHEMA_DDL, question=state["question"]))
+        correction = ""
+        if state.get("error") and state.get("sql"):
+            correction = CORRECTION_TEMPLATE.format(
+                previous_sql=state["sql"],
+                previous_error=state["error"],
+                attempt=state.get("attempt_count", 2),
+                max_attempts=get_settings().max_retries,
+            )
+
+        prompt = PROMPT.format(
+            schema=SCHEMA_DDL,
+            question=state["question"],
+            correction=correction,
+        )
+        raw = await chat(prompt)
         state["sql"] = _strip_fences(raw)
+        state["error"] = None
     except Exception as exc:
         state["error"] = f"generate failed: {exc}"
     finally:
-        state.setdefault("stage_timings", {})["generate"] = int((time.perf_counter() - started) * 1000)
+        state.setdefault("stage_timings", {})["generate"] = int(
+            (time.perf_counter() - started) * 1000
+        )
     return state
 
 

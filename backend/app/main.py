@@ -42,7 +42,7 @@ async def health():
 
 @app.post("/query")
 async def query(req: QueryRequest):
-    result = await graph().ainvoke({"question": req.question})
+    result = await graph().ainvoke({"question": req.question, "attempt_count": 1})
 
     payload = {
         "question": req.question,
@@ -53,6 +53,7 @@ async def query(req: QueryRequest):
         "overflow": result.get("overflow", False),
         "in_scope": result.get("in_scope"),
         "intent_type": result.get("intent_type"),
+        "attempt_count": result.get("attempt_count", 1),
         "error": result.get("error"),
         "stage_timings": result.get("stage_timings", {}),
     }
@@ -74,6 +75,7 @@ async def query(req: QueryRequest):
             "row_count": len(result.get("rows") or []),
             "total_row_count": result.get("total_row_count"),
             "overflow": result.get("overflow", False),
+            "attempt_count": result.get("attempt_count", 1),
             "error": result.get("error"),
         },
         trace_id=None,

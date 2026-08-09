@@ -41,6 +41,7 @@ export default function App() {
                 rows: data.rows,
                 totalRowCount: data.total_row_count,
                 overflow: data.overflow,
+                attemptCount: data.attempt_count,
                 error: data.error,
                 intentType: data.intent_type,
                 stageTimings: data.stage_timings,

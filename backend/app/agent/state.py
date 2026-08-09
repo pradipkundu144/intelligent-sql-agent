@@ -6,10 +6,12 @@ class AgentState(TypedDict, total=False):
     in_scope: bool
     intent_type: str
     intent: str
+    block_reason: str
     sql: str
     rows: list[dict]
     total_row_count: int
     overflow: bool
     answer: str
     error: str
+    attempt_count: int
     stage_timings: dict[str, int]
