@@ -1,4 +1,33 @@
+import { useEffect, useRef, useState } from "react";
+import Accordion from "./Accordion";
+
 type StageTokens = { model?: string; input?: number; output?: number };
+
+function AnimatedBar({ pct, index }: { pct: number; index: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (!ref.current) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setReady(entry.isIntersecting),
+      { threshold: 0.05 },
+    );
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className="h-1.5 w-28 rounded-full bg-slate-800/70 overflow-hidden">
+      <div
+        className="h-1.5 rounded-full bg-emerald-500/70"
+        style={{
+          width: ready ? `${pct}%` : "0%",
+          transition: "width 600ms cubic-bezier(0.22, 1, 0.36, 1)",
+          transitionDelay: `${index * 60}ms`,
+        }}
+      />
+    </div>
+  );
+}
 
 type Props = {
   stageTimings?: Record<string, number>;
@@ -47,45 +76,50 @@ export default function TracePanel({
   const totalCost = stages.reduce((sum, s) => sum + stageCost(stageTokens?.[s]), 0);
 
   return (
-    <details className="mt-3 border-t border-slate-100 pt-3">
-      <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-700">
-        Trace · {stages.length} stages · {totalMs} ms · {formatCost(totalCost)}
-      </summary>
-      <div className="mt-2 overflow-x-auto">
-        <table className="w-full text-xs">
+    <div className="mt-4 border-t border-slate-800 pt-3">
+      <Accordion
+        summary={
+          <>
+            Trace
+            <span className="text-slate-600">·</span>
+            <span>{stages.length} stages</span>
+            <span className="text-slate-600">·</span>
+            <span>{totalMs} ms</span>
+            <span className="text-slate-600">·</span>
+            <span>{formatCost(totalCost)}</span>
+          </>
+        }
+      >
+      <div className="overflow-x-auto">
+        <table className="w-full font-mono text-[11px]">
           <thead className="text-slate-500">
             <tr>
-              <th className="px-2 py-1 text-left font-medium">Stage</th>
-              <th className="px-2 py-1 text-left font-medium">Bar</th>
-              <th className="px-2 py-1 text-right font-medium">Time</th>
-              <th className="px-2 py-1 text-right font-medium">Tokens</th>
-              <th className="px-2 py-1 text-right font-medium">Cost</th>
+              <th className="px-2 py-1 text-left font-medium uppercase tracking-widest text-[10px]">Stage</th>
+              <th className="px-2 py-1 text-left font-medium uppercase tracking-widest text-[10px]">Bar</th>
+              <th className="px-2 py-1 text-right font-medium uppercase tracking-widest text-[10px]">Time</th>
+              <th className="px-2 py-1 text-right font-medium uppercase tracking-widest text-[10px]">Tokens</th>
+              <th className="px-2 py-1 text-right font-medium uppercase tracking-widest text-[10px]">Cost</th>
             </tr>
           </thead>
           <tbody>
-            {stages.map((stage) => {
+            {stages.map((stage, i) => {
               const ms = stageTimings[stage];
               const tokens = stageTokens?.[stage];
               const cost = stageCost(tokens);
               const barPct = (ms / maxMs) * 100;
               return (
-                <tr key={stage} className="border-t border-slate-100">
-                  <td className="px-2 py-1 text-slate-700">{stage}</td>
-                  <td className="px-2 py-1">
-                    <div className="h-2 w-24 rounded bg-slate-100">
-                      <div
-                        className="h-2 rounded bg-emerald-400"
-                        style={{ width: `${barPct}%` }}
-                      />
-                    </div>
+                <tr key={stage} className="border-t border-slate-900">
+                  <td className="px-2 py-1.5 text-slate-300">{stage}</td>
+                  <td className="px-2 py-1.5">
+                    <AnimatedBar pct={barPct} index={i} />
                   </td>
-                  <td className="px-2 py-1 text-right text-slate-700">{ms} ms</td>
-                  <td className="px-2 py-1 text-right text-slate-700">
+                  <td className="px-2 py-1.5 text-right text-slate-300">{ms} ms</td>
+                  <td className="px-2 py-1.5 text-right text-slate-400">
                     {tokens?.input != null && tokens?.output != null
                       ? `${tokens.input}↑ / ${tokens.output}↓`
                       : "—"}
                   </td>
-                  <td className="px-2 py-1 text-right text-slate-700">
+                  <td className="px-2 py-1.5 text-right text-slate-400">
                     {formatCost(cost)}
                   </td>
                 </tr>
@@ -93,38 +127,39 @@ export default function TracePanel({
             })}
           </tbody>
           <tfoot>
-            <tr className="border-t border-slate-200 font-medium">
-              <td className="px-2 py-1 text-slate-800" colSpan={2}>
+            <tr className="border-t border-slate-800">
+              <td className="px-2 py-1.5 text-slate-200 font-medium uppercase tracking-widest text-[10px]" colSpan={2}>
                 Total
               </td>
-              <td className="px-2 py-1 text-right text-slate-800">{totalMs} ms</td>
-              <td className="px-2 py-1 text-right text-slate-800">
+              <td className="px-2 py-1.5 text-right text-slate-200">{totalMs} ms</td>
+              <td className="px-2 py-1.5 text-right text-slate-400">
                 {attemptCount && attemptCount > 1
                   ? `${attemptCount} attempts`
                   : "1 attempt"}
               </td>
-              <td className="px-2 py-1 text-right text-slate-800">
+              <td className="px-2 py-1.5 text-right text-slate-200">
                 {formatCost(totalCost)}
               </td>
             </tr>
           </tfoot>
         </table>
         {(traceUrl || traceId) && (
-          <p className="mt-2 text-xs">
+          <p className="mt-3 font-mono text-[11px]">
             <a
               href={traceUrl || `https://cloud.langfuse.com/trace/${traceId}`}
               target="_blank"
               rel="noreferrer"
-              className="text-emerald-700 hover:text-emerald-900"
+              className="rounded text-emerald-400 hover:text-emerald-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
             >
               View full trace in Langfuse ↗
             </a>
-            <span className="ml-2 text-slate-400">
+            <span className="ml-2 text-slate-600">
               (may take a few seconds to appear)
             </span>
           </p>
         )}
       </div>
-    </details>
+      </Accordion>
+    </div>
   );
 }

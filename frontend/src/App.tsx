@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Header from "./components/Header";
 import AskBox from "./components/AskBox";
 import AnswerCard, { type Turn } from "./components/AnswerCard";
+import UserBubble from "./components/UserBubble";
+import ProgressPill from "./components/ProgressPill";
 import { streamQuery } from "./lib/stream";
+import { smoothScrollTo } from "./lib/scroll";
 import type { StageStatus } from "./components/StageProgress";
 
 const EXAMPLE_QUESTIONS = [
@@ -28,6 +31,16 @@ function initialLiveStages(): Turn["liveStages"] {
 export default function App() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const anyLoading = turns.some((t) => t.loading);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!mainRef.current || !bottomRef.current) return;
+    const main = mainRef.current;
+    const bottom = bottomRef.current;
+    const target = bottom.offsetTop - main.clientHeight + bottom.clientHeight;
+    return smoothScrollTo(main, target, 250);
+  }, [turns.length]);
 
   const updateTurn = (index: number, update: Partial<Turn> | ((prev: Turn) => Partial<Turn>)) => {
     setTurns((prev) =>
@@ -72,27 +85,41 @@ export default function App() {
           }));
         } else if (event.type === "done") {
           const data = event.payload as Record<string, unknown>;
-          updateTurn(index, {
-            loading: false,
-            answer: (data.answer as string) ?? "",
-            sql: (data.sql as string | null) ?? null,
-            rows: (data.rows as Turn["rows"]) ?? null,
-            totalRowCount: (data.total_row_count as number | null) ?? null,
-            overflow: (data.overflow as boolean) ?? false,
-            attemptCount: (data.attempt_count as number) ?? 1,
-            traceId: (data.trace_id as string | null) ?? null,
-            traceUrl: (data.trace_url as string | null) ?? null,
-            error: (data.error as string | null) ?? null,
-            intentType: (data.intent_type as Turn["intentType"]) ?? null,
-            stageTimings: (data.stage_timings as Record<string, number>) ?? {},
-            stageTokens: (data.stage_tokens as Turn["stageTokens"]) ?? {},
-            liveStages: undefined,
+          const finalTimings = (data.stage_timings as Record<string, number>) ?? {};
+          updateTurn(index, (prev) => {
+            const merged: Turn["liveStages"] = { ...(prev.liveStages ?? initialLiveStages()) };
+            for (const key of STAGE_KEYS) {
+              const wasDone = merged[key]?.status === "done";
+              if (finalTimings[key] != null) {
+                merged[key] = {
+                  status: "done",
+                  durationMs: merged[key]?.durationMs ?? finalTimings[key],
+                };
+              } else if (!wasDone) {
+                merged[key] = { ...merged[key], status: merged[key]?.status ?? "pending" };
+              }
+            }
+            return {
+              loading: false,
+              answer: (data.answer as string) ?? prev.answer ?? "",
+              sql: (data.sql as string | null) ?? null,
+              rows: (data.rows as Turn["rows"]) ?? null,
+              totalRowCount: (data.total_row_count as number | null) ?? null,
+              overflow: (data.overflow as boolean) ?? false,
+              attemptCount: (data.attempt_count as number) ?? 1,
+              traceId: (data.trace_id as string | null) ?? null,
+              traceUrl: (data.trace_url as string | null) ?? null,
+              error: (data.error as string | null) ?? null,
+              intentType: (data.intent_type as Turn["intentType"]) ?? null,
+              stageTimings: finalTimings,
+              stageTokens: (data.stage_tokens as Turn["stageTokens"]) ?? {},
+              liveStages: merged,
+            };
           });
         } else if (event.type === "error") {
           updateTurn(index, {
             loading: false,
             error: event.message,
-            liveStages: undefined,
           });
         }
       }
@@ -106,25 +133,54 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-full flex-col">
-      <Header />
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6">
-        {turns.length === 0 ? (
-          <div className="flex flex-1 flex-col items-center justify-center text-center text-slate-500">
-            <p className="text-lg">Ask a question about the shop data.</p>
-            <p className="mt-1 text-sm">
-              Try one of the examples below, or type your own.
-            </p>
-          </div>
-        ) : (
-          turns.map((turn, i) => <AnswerCard key={i} turn={turn} />)
-        )}
+    <div className="relative flex h-full flex-col bg-slate-950">
+      <div className="ambient-layer" aria-hidden>
+        <div className="ambient-blob ambient-blob-a" />
+        <div className="ambient-blob ambient-blob-b" />
+        <div className="ambient-blob ambient-blob-c" />
+      </div>
+      <div className="relative z-10">
+        <Header />
+      </div>
+      <main ref={mainRef} className="relative z-10 flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-6">
+          {turns.length === 0 ? (
+            <div className="flex min-h-[60vh] flex-1 flex-col items-center justify-center gap-2 text-center">
+              <p className="font-mono text-[11px] uppercase tracking-[0.25em] text-slate-600">
+                read-only · natural-language SQL
+              </p>
+              <p className="text-lg text-slate-200">Ask a question about the shop data.</p>
+              <p className="text-sm text-slate-500">
+                Try one of the examples below, or type your own.
+              </p>
+            </div>
+          ) : (
+            <>
+              {turns.map((turn, i) => (
+                <div key={i} className="flex flex-col gap-3 animate-[fadeIn_240ms_ease-out]">
+                  <div className="relative">
+                    <UserBubble question={turn.question} />
+                    {turn.liveStages && (
+                      <div className="absolute left-full top-0 ml-3 hidden lg:block">
+                        <ProgressPill stages={turn.liveStages} done={!turn.loading} />
+                      </div>
+                    )}
+                  </div>
+                  <AnswerCard turn={turn} />
+                </div>
+              ))}
+              <div ref={bottomRef} aria-hidden className="h-10 w-full" />
+            </>
+          )}
+        </div>
       </main>
-      <AskBox
-        examples={EXAMPLE_QUESTIONS}
-        onSubmit={handleSubmit}
-        disabled={anyLoading}
-      />
+      <div className="relative z-10">
+        <AskBox
+          examples={EXAMPLE_QUESTIONS}
+          onSubmit={handleSubmit}
+          disabled={anyLoading}
+        />
+      </div>
     </div>
   );
 }

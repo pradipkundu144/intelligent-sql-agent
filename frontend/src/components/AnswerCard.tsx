@@ -1,5 +1,10 @@
-import StageProgress, { type StageStatus } from "./StageProgress";
+import { useEffect, useState } from "react";
+import { type StageStatus } from "./StageProgress";
 import TracePanel from "./TracePanel";
+import Sparkles from "./Sparkles";
+import Accordion from "./Accordion";
+import RowsTable from "./RowsTable";
+import CopyButton from "./CopyButton";
 
 type Row = Record<string, unknown>;
 type StageTokens = { model?: string; input?: number; output?: number };
@@ -22,9 +27,39 @@ export type Turn = {
   liveStages?: Record<string, { status: StageStatus; durationMs?: number; startedAt?: number }>;
 };
 
+function borderColorForIntent(intent: Turn["intentType"], hasError: boolean | undefined): string {
+  if (hasError) return "border-l-red-500/70";
+  switch (intent) {
+    case "destructive":
+      return "border-l-red-500/70";
+    case "system_access":
+      return "border-l-orange-500/70";
+    case "data_unavailable":
+      return "border-l-amber-500/70";
+    case "out_of_scope":
+      return "border-l-slate-600";
+    default:
+      return "border-l-emerald-500/70";
+  }
+}
+
+function statusLabelForIntent(intent: Turn["intentType"]): string | null {
+  switch (intent) {
+    case "destructive":
+      return "blocked · destructive";
+    case "system_access":
+      return "blocked · system access";
+    case "data_unavailable":
+      return "not available";
+    case "out_of_scope":
+      return "out of scope";
+    default:
+      return null;
+  }
+}
+
 export default function AnswerCard({ turn }: { turn: Turn }) {
   const {
-    question,
     loading,
     answer,
     sql,
@@ -35,127 +70,133 @@ export default function AnswerCard({ turn }: { turn: Turn }) {
     intentType,
   } = turn;
 
+  const [caretVisible, setCaretVisible] = useState(false);
+
+  useEffect(() => {
+    if (loading) {
+      setCaretVisible(true);
+      return;
+    }
+    const t = setTimeout(() => setCaretVisible(false), 600);
+    return () => clearTimeout(t);
+  }, [loading]);
+
   const sampleCount = rows?.length ?? 0;
   const showRowsTable = !loading && rows && rows.length > 0;
+  const borderColor = borderColorForIntent(intentType, !!error);
+  const statusLabel = statusLabelForIntent(intentType);
+
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
-        {question}
-      </p>
-
-      {loading && turn.liveStages && (
-        <div className="mb-2">
-          <StageProgress stages={turn.liveStages} />
+    <div
+      className={`rounded-2xl rounded-tl-md border border-l-2 border-slate-800 bg-slate-900 p-5 shadow-[0_1px_0_0_rgb(148_163_184/0.03)_inset] ${borderColor}`}
+    >
+      {statusLabel && !loading && (
+        <div className="mb-3 flex items-center">
+          <span className={`font-mono text-[10px] uppercase tracking-widest ${
+            intentType === "destructive" || error
+              ? "text-red-400"
+              : intentType === "system_access"
+              ? "text-orange-400"
+              : intentType === "data_unavailable"
+              ? "text-amber-400"
+              : "text-slate-400"
+          }`}>
+            {statusLabel}
+          </span>
         </div>
       )}
-      {loading && !turn.liveStages && (
-        <p className="text-sm text-slate-500">Thinking…</p>
+
+      {loading && !answer && (
+        <div className="flex items-center gap-2">
+          <Sparkles />
+          <span className="thinking-shimmer font-mono text-xs">Thinking…</span>
+        </div>
       )}
 
       {answer && (
-        <p className="text-base text-slate-900 whitespace-pre-wrap">{answer}</p>
-      )}
-
-      {!loading && intentType === "destructive" && (
-        <span className="mt-2 inline-block rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
-          blocked · destructive
-        </span>
-      )}
-      {!loading && intentType === "out_of_scope" && (
-        <span className="mt-2 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-          out of scope
-        </span>
+        <p className="text-[15px] leading-relaxed text-slate-100 whitespace-pre-wrap">
+          {answer}
+          {caretVisible && (
+            <span
+              className={`streaming-caret ${!loading ? "streaming-caret-fade" : ""}`}
+              aria-hidden
+            />
+          )}
+        </p>
       )}
 
       {!loading && (turn.attemptCount ?? 1) > 1 && !error && (
-        <span className="ml-2 mt-2 inline-block rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
-          refined {turn.attemptCount!}× → succeeded
+        <span className="mt-3 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-emerald-400">
+          <span className="h-1 w-1 rounded-full bg-emerald-500" />
+          refined {turn.attemptCount!}× · succeeded
         </span>
       )}
       {!loading && (turn.attemptCount ?? 1) > 1 && error && (
-        <span className="ml-2 mt-2 inline-block rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
-          refined {turn.attemptCount!}× → gave up
+        <span className="mt-3 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-amber-400">
+          <span className="h-1 w-1 rounded-full bg-amber-500" />
+          refined {turn.attemptCount!}× · gave up
         </span>
       )}
 
       {!loading && error && (
-        <p className="mt-2 rounded bg-red-50 p-2 text-xs text-red-700">
+        <p className="mt-3 rounded border border-red-900/40 bg-red-950/40 p-2 font-mono text-[11px] text-red-300">
           {error}
         </p>
       )}
 
       {!loading && overflow && totalRowCount != null && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <span className="inline-block rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+        <div className="mt-3">
+          <span className="inline-flex items-center gap-1.5 rounded border border-amber-900/40 bg-amber-950/40 px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-amber-300">
             {totalRowCount.toLocaleString()} rows · sample of {sampleCount}
           </span>
         </div>
       )}
 
       {!loading && sql && (
-        <details className="mt-3">
-          <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-700">
-            View SQL <span className="ml-1 text-emerald-600">read-only ✓</span>
-          </summary>
-          <pre className="mt-2 overflow-x-auto rounded bg-slate-50 p-3 text-xs text-slate-800">
-            {sql}
-          </pre>
-        </details>
+        <div className="mt-4 animate-[fadeIn_260ms_ease-out]">
+          <Accordion
+            summary={
+              <>
+                View SQL
+                <span className="text-emerald-500">read-only ✓</span>
+              </>
+            }
+          >
+            <div className="relative">
+              <div className="absolute right-2 top-2 z-10">
+                <CopyButton text={sql} label="Copy SQL" />
+              </div>
+              <pre className="overflow-x-auto rounded border border-slate-800 bg-slate-950 p-3 pr-32 font-mono text-[12px] leading-relaxed text-slate-300">
+                {sql}
+              </pre>
+            </div>
+          </Accordion>
+        </div>
       )}
 
       {showRowsTable && (
-        <details className="mt-2" open={overflow ? true : undefined}>
-          <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-700">
-            {overflow
-              ? `View sample rows (${sampleCount} of ${totalRowCount?.toLocaleString()})`
-              : `View rows (${rows!.length})`}
-          </summary>
-          <div className="mt-2 overflow-x-auto rounded border border-slate-200">
-            <table className="w-full text-xs">
-              <thead className="bg-slate-50 text-slate-600">
-                <tr>
-                  {Object.keys(rows![0]).map((col) => (
-                    <th
-                      key={col}
-                      className="border-b border-slate-200 px-2 py-1 text-left font-medium"
-                    >
-                      {col}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows!.slice(0, 20).map((row, i) => (
-                  <tr key={i} className="odd:bg-white even:bg-slate-50">
-                    {Object.values(row).map((val, j) => (
-                      <td
-                        key={j}
-                        className="border-b border-slate-100 px-2 py-1 text-slate-800"
-                      >
-                        {String(val)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {!overflow && rows!.length > 20 && (
-              <p className="p-2 text-xs text-slate-500">
-                Showing first 20 of {rows!.length} rows.
-              </p>
-            )}
-          </div>
-        </details>
+        <div className="mt-3">
+          <Accordion
+            defaultOpen={overflow}
+            summary={
+              overflow
+                ? `Sample rows (${sampleCount} of ${totalRowCount?.toLocaleString()})`
+                : `Rows (${rows!.length})`
+            }
+          >
+            <RowsTable rows={rows!} overflow={!!overflow} />
+          </Accordion>
+        </div>
       )}
 
       {!loading && showRowsTable && (totalRowCount ?? rows!.length) > 20 && (
-        <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+        <div className="mt-3 flex flex-wrap gap-2">
           <button
             type="button"
             disabled
             title="Coming soon"
-            className="cursor-not-allowed rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-400"
+            className="cursor-not-allowed rounded border border-slate-800 bg-slate-900 px-3 py-1.5 font-mono text-[11px] text-slate-500"
           >
             {overflow
               ? `View full results (${totalRowCount!.toLocaleString()} rows) →`
@@ -165,7 +206,7 @@ export default function AnswerCard({ turn }: { turn: Turn }) {
             type="button"
             disabled
             title="Coming soon"
-            className="cursor-not-allowed rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-400"
+            className="cursor-not-allowed rounded border border-slate-800 bg-slate-900 px-3 py-1.5 font-mono text-[11px] text-slate-500"
           >
             Download CSV
           </button>
@@ -173,6 +214,7 @@ export default function AnswerCard({ turn }: { turn: Turn }) {
       )}
 
       {!loading && (
+        <div className="animate-[fadeIn_300ms_ease-out]">
         <TracePanel
           stageTimings={turn.stageTimings}
           stageTokens={turn.stageTokens}
@@ -180,6 +222,7 @@ export default function AnswerCard({ turn }: { turn: Turn }) {
           traceUrl={turn.traceUrl}
           attemptCount={turn.attemptCount}
         />
+        </div>
       )}
     </div>
   );
