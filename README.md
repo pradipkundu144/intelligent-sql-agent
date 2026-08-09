@@ -2,10 +2,11 @@
 
 A natural-language analytics assistant with generation, validation, guardrails, observability, and evaluation.
 
-- **Product spec:** see `../PRD_Intelligent_SQL_AI_Agent.docx`
-- **Setup guide:** see `../Setup_Deployment_Intelligent_SQL_AI_Agent.docx`
-- **UI/UX spec:** see `../UIUX_Flow_Intelligent_SQL_AI_Agent.docx`
-- **Build plan (6 days):** see `../BUILD_PLAN.md`
+- **Product spec:** see `../prd/PRD.md`
+- **Setup guide:** see `../prd/Setup.md`
+- **UI/UX spec:** see `../prd/UIUX.md`
+- **Build plan (6 days):** see `../planning/BUILD_PLAN.md`
+- **Original brief:** see `../requirements/Original requirement.txt`
 
 ## Quick start (once Day 2 lands)
 
