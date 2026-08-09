@@ -42,6 +42,24 @@ CREATE INDEX idx_orders_date         ON orders(order_date);
 CREATE INDEX idx_order_items_order   ON order_items(order_id);
 CREATE INDEX idx_order_items_product ON order_items(product_id);
 
+CREATE TABLE few_shots (
+    id         SERIAL PRIMARY KEY,
+    question   TEXT NOT NULL,
+    sql        TEXT NOT NULL,
+    embedding  vector(1536) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_few_shots_embedding ON few_shots USING hnsw (embedding vector_cosine_ops);
+
+CREATE TABLE column_docs (
+    id           SERIAL PRIMARY KEY,
+    table_name   TEXT NOT NULL,
+    column_name  TEXT NOT NULL,
+    description  TEXT NOT NULL,
+    embedding    vector(1536) NOT NULL
+);
+CREATE INDEX idx_column_docs_embedding ON column_docs USING hnsw (embedding vector_cosine_ops);
+
 DO $$
 DECLARE
     pw TEXT := coalesce(current_setting('agent.readonly_password', true), '');

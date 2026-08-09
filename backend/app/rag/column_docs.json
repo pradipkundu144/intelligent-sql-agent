@@ -1,0 +1,77 @@
+[
+  {
+    "table": "customers",
+    "column": "customer_id",
+    "description": "Primary key. Also appears in orders.customer_id as a foreign key. When joining customers and orders, always qualify (e.g. c.customer_id) to avoid ambiguous-column errors."
+  },
+  {
+    "table": "customers",
+    "column": "state",
+    "description": "Two-letter Indian state code (MH, DL, KA, TN, TS, WB, GJ, RJ, UP, MP, BR, PB, CH, JH, AS, KL, OD). Use for geographic aggregation."
+  },
+  {
+    "table": "customers",
+    "column": "join_date",
+    "description": "Date the customer registered. Spans roughly the last 2 years relative to CURRENT_DATE. Use for cohort analysis, tenure, and 'new customer' filtering."
+  },
+  {
+    "table": "products",
+    "column": "category",
+    "description": "One of five values: 'Electronics', 'Apparel', 'Home', 'Books', 'Fitness'. Each category has 20 products. Use for category-level aggregation and filtering."
+  },
+  {
+    "table": "products",
+    "column": "price",
+    "description": "Current list price in USD. Note: order_items.unit_price captures the historical price paid at the time of purchase, which may differ. Use products.price for current-catalog analysis and order_items.unit_price for historical revenue."
+  },
+  {
+    "table": "orders",
+    "column": "status",
+    "description": "One of five values: 'pending', 'paid', 'shipped', 'delivered', 'cancelled'. For revenue calculations, ALWAYS filter status IN ('paid', 'shipped', 'delivered') — exclude 'pending' (not yet confirmed) and 'cancelled' (revenue reversed). This is the business convention for 'revenue'."
+  },
+  {
+    "table": "orders",
+    "column": "total_amount",
+    "description": "Total order amount in USD, excluding tax. Sum of quantity * unit_price across the order's items. Use for revenue, per-customer spend, average order value. Combine with a status filter for accurate revenue."
+  },
+  {
+    "table": "orders",
+    "column": "order_date",
+    "description": "Date the order was placed. Spans roughly the last 180 days relative to CURRENT_DATE (seed data is anchored to boot time). Use date_trunc('month' | 'week' | 'day', order_date) for time-series aggregation, and CURRENT_DATE-relative filters for 'this week', 'this month', 'last N days'."
+  },
+  {
+    "table": "orders",
+    "column": "customer_id",
+    "description": "Foreign key to customers.customer_id. Also present in customers table — always qualify (e.g. o.customer_id) in JOINs to avoid ambiguous-column errors."
+  },
+  {
+    "table": "order_items",
+    "column": "order_id",
+    "description": "Foreign key to orders.order_id. Also present in orders table — always qualify (e.g. oi.order_id) in JOINs to avoid ambiguous-column errors."
+  },
+  {
+    "table": "order_items",
+    "column": "product_id",
+    "description": "Foreign key to products.product_id. Also present in products table — always qualify in JOINs."
+  },
+  {
+    "table": "order_items",
+    "column": "quantity",
+    "description": "Number of units of the product in this line item. Always positive. For per-product volume, SUM(quantity) grouped by product_id."
+  },
+  {
+    "table": "order_items",
+    "column": "unit_price",
+    "description": "Historical price per unit at the time of purchase (may differ from current products.price). Use quantity * unit_price for accurate historical revenue at the item level; orders.total_amount is the pre-computed order-level total."
+  },
+  {
+    "table": "customers",
+    "column": "name",
+    "description": "Customer full name (first + last). Note: there is no separate email, phone, address, or age column — if the user asks for these, the data isn't available."
+  },
+  {
+    "table": "products",
+    "column": "product_name",
+    "description": "Product display name (e.g. 'Wireless Headphones', 'Cotton T-Shirt'). Note: there is no separate SKU, inventory count, weight, or dimensions column — if the user asks for these, the data isn't available."
+  }
+]

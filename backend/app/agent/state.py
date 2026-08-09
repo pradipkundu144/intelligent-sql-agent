@@ -14,4 +14,6 @@ class AgentState(TypedDict, total=False):
     answer: str
     error: str
     attempt_count: int
+    trace_id: str
     stage_timings: dict[str, int]
+    stage_tokens: dict[str, dict]

@@ -1,4 +1,8 @@
+import StageProgress, { type StageStatus } from "./StageProgress";
+import TracePanel from "./TracePanel";
+
 type Row = Record<string, unknown>;
+type StageTokens = { model?: string; input?: number; output?: number };
 
 export type Turn = {
   question: string;
@@ -9,9 +13,13 @@ export type Turn = {
   totalRowCount?: number | null;
   overflow?: boolean;
   attemptCount?: number;
+  traceId?: string | null;
+  traceUrl?: string | null;
   error?: string | null;
-  intentType?: "query" | "destructive" | "out_of_scope" | null;
+  intentType?: "query" | "destructive" | "out_of_scope" | "system_access" | "data_unavailable" | null;
   stageTimings?: Record<string, number>;
+  stageTokens?: Record<string, StageTokens>;
+  liveStages?: Record<string, { status: StageStatus; durationMs?: number; startedAt?: number }>;
 };
 
 export default function AnswerCard({ turn }: { turn: Turn }) {
@@ -36,10 +44,17 @@ export default function AnswerCard({ turn }: { turn: Turn }) {
         {question}
       </p>
 
-      {loading && <p className="text-sm text-slate-500">Thinking…</p>}
+      {loading && turn.liveStages && (
+        <div className="mb-2">
+          <StageProgress stages={turn.liveStages} />
+        </div>
+      )}
+      {loading && !turn.liveStages && (
+        <p className="text-sm text-slate-500">Thinking…</p>
+      )}
 
-      {!loading && answer && (
-        <p className="text-base text-slate-900">{answer}</p>
+      {answer && (
+        <p className="text-base text-slate-900 whitespace-pre-wrap">{answer}</p>
       )}
 
       {!loading && intentType === "destructive" && (
@@ -155,6 +170,16 @@ export default function AnswerCard({ turn }: { turn: Turn }) {
             Download CSV
           </button>
         </div>
+      )}
+
+      {!loading && (
+        <TracePanel
+          stageTimings={turn.stageTimings}
+          stageTokens={turn.stageTokens}
+          traceId={turn.traceId}
+          traceUrl={turn.traceUrl}
+          attemptCount={turn.attemptCount}
+        />
       )}
     </div>
   );

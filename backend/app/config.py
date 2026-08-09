@@ -28,9 +28,14 @@ class Settings(BaseSettings):
     max_retries: int = 3
     max_subquestions: int = 5
 
+    rag_enabled: bool = True
+    rag_top_k_examples: int = 3
+    rag_top_k_column_docs: int = 5
+
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
     langfuse_host: str = "https://cloud.langfuse.com"
+    langfuse_project_id: str | None = None
 
     framework: str = "langgraph"
 

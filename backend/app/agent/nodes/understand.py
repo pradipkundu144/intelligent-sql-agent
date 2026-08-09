@@ -94,10 +94,14 @@ Return:
 async def understand(state: AgentState) -> AgentState:
     started = time.perf_counter()
     try:
+        usage_sink = state.setdefault("stage_tokens", {}).setdefault("understand", {})
         result = await chat_json(
             PROMPT.format(schema=SCHEMA_DDL, question=state["question"]),
             schema=_IntentResult,
             model="gpt-4o-mini",
+            trace_id=state.get("trace_id"),
+            span_name="understand",
+            usage_sink=usage_sink,
         )
         state["intent_type"] = result.intent_type
         state["intent"] = result.intent

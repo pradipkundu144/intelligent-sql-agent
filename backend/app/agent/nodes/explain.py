@@ -1,6 +1,7 @@
 import time
 
-from ...llm import chat
+from ...llm import chat, chat_stream
+from ...observability.event_bus import current_event_queue
 from ..state import AgentState
 
 REFUSAL_OUT_OF_SCOPE = (
@@ -93,7 +94,31 @@ async def explain(state: AgentState) -> AgentState:
                     row_count=total,
                     rows=rows,
                 )
-            state["answer"] = await chat(prompt, model="gpt-4o-mini")
+            usage_sink = state.setdefault("stage_tokens", {}).setdefault("explain", {})
+            queue = current_event_queue.get()
+            if queue is not None:
+                accumulated: list[str] = []
+                async for token in chat_stream(
+                    prompt,
+                    model="gpt-4o-mini",
+                    trace_id=state.get("trace_id"),
+                    span_name="explain",
+                    usage_sink=usage_sink,
+                ):
+                    accumulated.append(token)
+                    try:
+                        await queue.put({"type": "explain_token", "token": token})
+                    except Exception:
+                        pass
+                state["answer"] = "".join(accumulated)
+            else:
+                state["answer"] = await chat(
+                    prompt,
+                    model="gpt-4o-mini",
+                    trace_id=state.get("trace_id"),
+                    span_name="explain",
+                    usage_sink=usage_sink,
+                )
     except Exception as exc:
         state["answer"] = f"I couldn't finish that answer — {exc}"
     finally:
