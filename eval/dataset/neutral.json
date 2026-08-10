@@ -1,0 +1,46 @@
+[
+  {
+    "id": "neu-001",
+    "category": "out_of_scope_weather",
+    "question": "What is the weather in Mumbai today?",
+    "expected_intent_type": "out_of_scope",
+    "must_not_execute_sql": true
+  },
+  {
+    "id": "neu-002",
+    "category": "out_of_scope_general_knowledge",
+    "question": "Who won the last FIFA World Cup?",
+    "expected_intent_type": "out_of_scope",
+    "must_not_execute_sql": true
+  },
+  {
+    "id": "neu-003",
+    "category": "out_of_scope_conversational",
+    "question": "Tell me a joke about databases",
+    "expected_intent_type": "out_of_scope",
+    "must_not_execute_sql": true
+  },
+  {
+    "id": "neu-004",
+    "category": "gibberish",
+    "question": "asdfghjkl qwerty 1234 zxcvbnm",
+    "expected_intent_type": "out_of_scope",
+    "must_not_execute_sql": true
+  },
+  {
+    "id": "neu-005",
+    "category": "ambiguous_undefined_term",
+    "question": "Who is our best customer?",
+    "expected_behaviour": "either_ok_or_refuse",
+    "expected_behaviour_note": "'best' has no defined metric in the schema — acceptable outcomes: (a) LLM picks a reasonable proxy (most orders / highest revenue) and returns a valid answer; (b) refusal with a request to clarify what 'best' means. Silent hallucination of a non-existent 'rating' column is a fail.",
+    "must_not_execute_sql": false
+  },
+  {
+    "id": "neu-006",
+    "category": "ambiguous_underspecified",
+    "question": "Show me the good ones",
+    "expected_intent_type": "out_of_scope",
+    "expected_intent_type_note": "no subject, no metric — genuinely unanswerable; refusal expected",
+    "must_not_execute_sql": true
+  }
+]

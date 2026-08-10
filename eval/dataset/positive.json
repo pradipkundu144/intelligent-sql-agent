@@ -1,0 +1,97 @@
+[
+  {
+    "id": "pos-001",
+    "category": "count",
+    "question": "How many customers are there?",
+    "expected": { "kind": "scalar", "value": 500, "tolerance": 0 }
+  },
+  {
+    "id": "pos-002",
+    "category": "count",
+    "question": "How many products do we sell?",
+    "expected": { "kind": "scalar", "value": 100, "tolerance": 0 }
+  },
+  {
+    "id": "pos-003",
+    "category": "count",
+    "question": "How many orders have been placed in total?",
+    "expected": { "kind": "scalar", "value": 800, "tolerance": 0 }
+  },
+  {
+    "id": "pos-004",
+    "category": "aggregation",
+    "question": "Revenue by month",
+    "expected": { "kind": "row_count", "min": 6, "max": 12, "columns_include": ["month", "revenue"] }
+  },
+  {
+    "id": "pos-005",
+    "category": "aggregation",
+    "question": "How many customers do we have in each state?",
+    "expected": { "kind": "row_count", "min": 10, "max": 50 }
+  },
+  {
+    "id": "pos-006",
+    "category": "aggregation",
+    "question": "How many products are in each category?",
+    "expected": { "kind": "row_count", "min": 5, "max": 5, "columns_include": ["category"], "note": "5 categories in the seed catalogue" }
+  },
+  {
+    "id": "pos-007",
+    "category": "join_having",
+    "question": "Find repeat customers",
+    "expected": { "kind": "row_count", "min": 100, "note": "any customer with >1 order; seed guarantees many" }
+  },
+  {
+    "id": "pos-008",
+    "category": "top_n",
+    "question": "What are the top 10 products by price?",
+    "expected": { "kind": "row_count", "min": 10, "max": 10 }
+  },
+  {
+    "id": "pos-009",
+    "category": "top_n",
+    "question": "Show me the 5 customers who placed the most orders",
+    "expected": { "kind": "row_count", "min": 5, "max": 5 }
+  },
+  {
+    "id": "pos-010",
+    "category": "filter",
+    "question": "How many orders are in delivered status?",
+    "expected": { "kind": "scalar", "kind_hint": "int > 0", "min": 1 }
+  },
+  {
+    "id": "pos-011",
+    "category": "date_range",
+    "question": "How many orders were placed in the last 30 days?",
+    "expected": { "kind": "scalar", "kind_hint": "int > 0", "min": 1, "note": "CURRENT_DATE-anchored seed guarantees non-empty" }
+  },
+  {
+    "id": "pos-012",
+    "category": "revenue_correctness",
+    "question": "What is the total revenue?",
+    "expected": {
+      "kind": "scalar_range",
+      "min": 300000,
+      "max": 400000,
+      "note": "with RAG: paid/shipped/delivered only, ~$341k on current seed; brittle to seed changes"
+    }
+  },
+  {
+    "id": "pos-013",
+    "category": "join_aggregation",
+    "question": "What is the total quantity sold for each product category?",
+    "expected": { "kind": "row_count", "min": 5, "max": 5, "columns_include": ["category"] }
+  },
+  {
+    "id": "pos-014",
+    "category": "join_top_n",
+    "question": "Which 3 categories generated the most revenue?",
+    "expected": { "kind": "row_count", "min": 3, "max": 3 }
+  },
+  {
+    "id": "pos-015",
+    "category": "empty_result",
+    "question": "How many customers are named 'Nonexistent Person'?",
+    "expected": { "kind": "scalar", "value": 0, "tolerance": 0, "note": "honest zero — LLM must not hallucinate" }
+  }
+]

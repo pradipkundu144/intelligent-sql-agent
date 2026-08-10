@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from . import business_db, chat
+from .agent.decompose import decompose
 from .agent.graph import graph
 from .config import get_settings
 from .logging_config import configure_logging
@@ -58,40 +59,28 @@ async def health():
     return {"status": status, "postgres": postgres_ok, "mongodb": mongo_ok}
 
 
-@app.post("/query")
-async def query(req: QueryRequest):
-    settings = get_settings()
-    langfuse_client = get_langfuse()
-    trace_id = None
-    trace = None
-    trace_url = None
-    if langfuse_client:
-        try:
-            trace = langfuse_client.trace(name="query", input={"question": req.question})
-            trace_id = trace.id
-            if trace_id and settings.langfuse_project_id:
-                trace_url = f"{settings.langfuse_host.rstrip('/')}/project/{settings.langfuse_project_id}/traces/{trace_id}"
-        except Exception as exc:
-            logger.warning("langfuse: trace creation failed: %s", exc)
+def _outcome_from(result: dict) -> str:
+    intent_type = result.get("intent_type")
+    if result.get("error"):
+        return "error"
+    if intent_type == "destructive":
+        return "blocked"
+    if intent_type == "out_of_scope":
+        return "out_of_scope"
+    return "ok"
 
+
+async def _run_one(
+    question: str,
+    trace_id: str | None,
+    trace_url: str | None,
+    parent_question: str | None = None,
+) -> dict:
     result = await graph().ainvoke(
-        {"question": req.question, "attempt_count": 1, "trace_id": trace_id}
+        {"question": question, "attempt_count": 1, "trace_id": trace_id}
     )
-
-    if trace:
-        try:
-            trace.update(output={"answer": result.get("answer")})
-        except Exception:
-            pass
-
-    if langfuse_client:
-        try:
-            langfuse_client.flush()
-        except Exception:
-            pass
-
     payload = {
-        "question": req.question,
+        "question": question,
         "answer": result.get("answer"),
         "sql": result.get("sql"),
         "rows": result.get("rows"),
@@ -106,19 +95,8 @@ async def query(req: QueryRequest):
         "stage_timings": result.get("stage_timings", {}),
         "stage_tokens": result.get("stage_tokens", {}),
     }
-
-    intent_type = result.get("intent_type")
-    if result.get("error"):
-        outcome = "error"
-    elif intent_type == "destructive":
-        outcome = "blocked"
-    elif intent_type == "out_of_scope":
-        outcome = "out_of_scope"
-    else:
-        outcome = "ok"
-
     await chat.save_turn(
-        question=req.question,
+        question=question,
         sql=result.get("sql"),
         results_summary={
             "row_count": len(result.get("rows") or []),
@@ -126,37 +104,275 @@ async def query(req: QueryRequest):
             "overflow": result.get("overflow", False),
             "attempt_count": result.get("attempt_count", 1),
             "error": result.get("error"),
+            "parent_question": parent_question,
         },
         trace_id=trace_id,
-        outcome=outcome,
+        outcome=_outcome_from(result),
     )
-
     return payload
+
+
+def _new_trace(question: str) -> tuple[str | None, object | None, str | None]:
+    settings = get_settings()
+    client = get_langfuse()
+    if not client:
+        return None, None, None
+    try:
+        trace = client.trace(name="query", input={"question": question})
+        trace_id = trace.id
+        trace_url = None
+        if trace_id and settings.langfuse_project_id:
+            trace_url = (
+                f"{settings.langfuse_host.rstrip('/')}/project/"
+                f"{settings.langfuse_project_id}/traces/{trace_id}"
+            )
+        return trace_id, trace, trace_url
+    except Exception as exc:
+        logger.warning("langfuse: trace creation failed: %s", exc)
+        return None, None, None
+
+
+def _flush_trace(trace, summary_output: dict) -> None:
+    if trace:
+        try:
+            trace.update(output=summary_output)
+        except Exception:
+            pass
+    client = get_langfuse()
+    if client:
+        try:
+            client.flush()
+        except Exception:
+            pass
+
+
+@app.post("/query")
+async def query(req: QueryRequest):
+    subquestions = await decompose(req.question)
+
+    if len(subquestions) == 1:
+        trace_id, trace, trace_url = _new_trace(subquestions[0])
+        payload = await _run_one(subquestions[0], trace_id, trace_url)
+        _flush_trace(trace, {"answer": payload.get("answer")})
+        return payload
+
+    parent_trace_id, parent_trace, parent_trace_url = _new_trace(req.question)
+    tasks = [
+        _run_one(sub, parent_trace_id, parent_trace_url, parent_question=req.question)
+        for sub in subquestions
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    blocks: list[dict] = []
+    for sub, r in zip(subquestions, results):
+        if isinstance(r, Exception):
+            blocks.append({
+                "question": sub,
+                "answer": "This part of your request failed unexpectedly.",
+                "error": f"internal error: {r}",
+                "sql": None,
+                "rows": None,
+                "total_row_count": None,
+                "overflow": False,
+                "in_scope": None,
+                "intent_type": None,
+                "attempt_count": 1,
+                "trace_id": parent_trace_id,
+                "trace_url": parent_trace_url,
+                "stage_timings": {},
+                "stage_tokens": {},
+            })
+        else:
+            blocks.append(r)
+
+    _flush_trace(parent_trace, {"block_count": len(blocks)})
+
+    return {
+        "parent_question": req.question,
+        "block_count": len(blocks),
+        "parent_trace_id": parent_trace_id,
+        "parent_trace_url": parent_trace_url,
+        "blocks": blocks,
+    }
+
+
+class _TaggedQueue:
+    def __init__(self, real_queue: asyncio.Queue, sub_index: int) -> None:
+        self._q = real_queue
+        self._sub = sub_index
+
+    async def put(self, event: dict) -> None:
+        tagged = {**event, "sub": self._sub}
+        await self._q.put(tagged)
+
+
+async def _run_sub_streaming(
+    sub_index: int,
+    question: str,
+    trace_id: str | None,
+    trace_url: str | None,
+    parent_question: str,
+    shared_queue: asyncio.Queue,
+) -> dict:
+    tagged = _TaggedQueue(shared_queue, sub_index)
+    current_event_queue.set(tagged)  # type: ignore[arg-type]
+
+    initial_state = {"question": question, "attempt_count": 1, "trace_id": trace_id}
+    final_state: dict = {}
+
+    async for event in graph().astream_events(initial_state, version="v1"):
+        ev_type = event.get("event")
+        name = event.get("name")
+        if name in KNOWN_NODES:
+            if ev_type == "on_chain_start":
+                await tagged.put({
+                    "type": "stage_start",
+                    "stage": name,
+                    "t": int(time.time() * 1000),
+                })
+            elif ev_type == "on_chain_end":
+                await tagged.put({
+                    "type": "stage_end",
+                    "stage": name,
+                    "t": int(time.time() * 1000),
+                })
+        if ev_type == "on_chain_end":
+            node_output = event.get("data", {}).get("output")
+            if isinstance(node_output, dict):
+                final_state.update(node_output)
+
+    result = final_state
+    payload = {
+        "question": question,
+        "answer": result.get("answer"),
+        "sql": result.get("sql"),
+        "rows": result.get("rows"),
+        "total_row_count": result.get("total_row_count"),
+        "overflow": result.get("overflow", False),
+        "in_scope": result.get("in_scope"),
+        "intent_type": result.get("intent_type"),
+        "attempt_count": result.get("attempt_count", 1),
+        "trace_id": trace_id,
+        "trace_url": trace_url,
+        "error": result.get("error"),
+        "stage_timings": result.get("stage_timings", {}),
+        "stage_tokens": result.get("stage_tokens", {}),
+    }
+    await chat.save_turn(
+        question=question,
+        sql=result.get("sql"),
+        results_summary={
+            "row_count": len(result.get("rows") or []),
+            "total_row_count": result.get("total_row_count"),
+            "overflow": result.get("overflow", False),
+            "attempt_count": result.get("attempt_count", 1),
+            "error": result.get("error"),
+            "parent_question": parent_question,
+        },
+        trace_id=trace_id,
+        outcome=_outcome_from(result),
+    )
+    await tagged.put({"type": "sub_done", "payload": payload})
+    return payload
+
+
+async def _stream_multi(parent_question: str, subquestions: list[str]):
+    parent_trace_id, parent_trace, parent_trace_url = _new_trace(parent_question)
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def run_all() -> None:
+        try:
+            await queue.put({
+                "type": "parent_start",
+                "parent_question": parent_question,
+                "subquestions": subquestions,
+                "t": int(time.time() * 1000),
+            })
+
+            tasks = [
+                _run_sub_streaming(i, sub, parent_trace_id, parent_trace_url, parent_question, queue)
+                for i, sub in enumerate(subquestions)
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            blocks: list[dict] = []
+            for i, (sub, r) in enumerate(zip(subquestions, results)):
+                if isinstance(r, Exception):
+                    err_block = {
+                        "question": sub,
+                        "answer": "This part of your request failed unexpectedly.",
+                        "error": f"internal error: {r}",
+                        "sql": None,
+                        "rows": None,
+                        "total_row_count": None,
+                        "overflow": False,
+                        "in_scope": None,
+                        "intent_type": None,
+                        "attempt_count": 1,
+                        "trace_id": parent_trace_id,
+                        "trace_url": parent_trace_url,
+                        "stage_timings": {},
+                        "stage_tokens": {},
+                    }
+                    blocks.append(err_block)
+                    await queue.put({"type": "sub_done", "sub": i, "payload": err_block})
+                else:
+                    blocks.append(r)
+
+            _flush_trace(parent_trace, {"block_count": len(blocks)})
+
+            await queue.put({
+                "type": "done",
+                "payload": {
+                    "parent_question": parent_question,
+                    "block_count": len(blocks),
+                    "parent_trace_id": parent_trace_id,
+                    "parent_trace_url": parent_trace_url,
+                    "blocks": blocks,
+                },
+            })
+        except Exception as exc:
+            logger.exception("query_stream multi failed")
+            await queue.put({"type": "error", "message": str(exc)})
+        finally:
+            await queue.put(None)
+
+    asyncio.create_task(run_all())
+
+    async def sse_gen():
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            yield f"data: {json.dumps(jsonable_encoder(event))}\n\n"
+
+    return StreamingResponse(
+        sse_gen(),
+        media_type="text/event-stream",
+        headers={
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.post("/query/stream")
 async def query_stream(req: QueryRequest):
-    settings = get_settings()
-    langfuse_client = get_langfuse()
-    trace_id = None
-    trace = None
-    trace_url = None
-    if langfuse_client:
-        try:
-            trace = langfuse_client.trace(name="query", input={"question": req.question})
-            trace_id = trace.id
-            if trace_id and settings.langfuse_project_id:
-                trace_url = f"{settings.langfuse_host.rstrip('/')}/project/{settings.langfuse_project_id}/traces/{trace_id}"
-        except Exception as exc:
-            logger.warning("langfuse: trace creation failed: %s", exc)
+    subquestions = await decompose(req.question)
 
+    if len(subquestions) > 1:
+        return await _stream_multi(req.question, subquestions)
+
+    single_question = subquestions[0]
+    trace_id, trace, trace_url = _new_trace(single_question)
     queue: asyncio.Queue = asyncio.Queue()
 
     async def run_graph() -> None:
         current_event_queue.set(queue)
         try:
             initial_state = {
-                "question": req.question,
+                "question": single_question,
                 "attempt_count": 1,
                 "trace_id": trace_id,
             }
@@ -184,19 +400,10 @@ async def query_stream(req: QueryRequest):
 
             result = final_state
 
-            if trace:
-                try:
-                    trace.update(output={"answer": result.get("answer")})
-                except Exception:
-                    pass
-            if langfuse_client:
-                try:
-                    langfuse_client.flush()
-                except Exception:
-                    pass
+            _flush_trace(trace, {"answer": result.get("answer")})
 
             payload = {
-                "question": req.question,
+                "question": single_question,
                 "answer": result.get("answer"),
                 "sql": result.get("sql"),
                 "rows": result.get("rows"),
@@ -212,18 +419,8 @@ async def query_stream(req: QueryRequest):
                 "stage_tokens": result.get("stage_tokens", {}),
             }
 
-            intent_type = result.get("intent_type")
-            if result.get("error"):
-                outcome = "error"
-            elif intent_type == "destructive":
-                outcome = "blocked"
-            elif intent_type == "out_of_scope":
-                outcome = "out_of_scope"
-            else:
-                outcome = "ok"
-
             await chat.save_turn(
-                question=req.question,
+                question=single_question,
                 sql=result.get("sql"),
                 results_summary={
                     "row_count": len(result.get("rows") or []),
@@ -233,7 +430,7 @@ async def query_stream(req: QueryRequest):
                     "error": result.get("error"),
                 },
                 trace_id=trace_id,
-                outcome=outcome,
+                outcome=_outcome_from(result),
             )
 
             await queue.put({"type": "done", "payload": payload})

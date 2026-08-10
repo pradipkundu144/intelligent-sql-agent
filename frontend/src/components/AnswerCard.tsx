@@ -9,9 +9,10 @@ import CopyButton from "./CopyButton";
 type Row = Record<string, unknown>;
 type StageTokens = { model?: string; input?: number; output?: number };
 
-export type Turn = {
+export type LiveStages = Record<string, { status: StageStatus; durationMs?: number; startedAt?: number }>;
+
+export type SubBlock = {
   question: string;
-  loading: boolean;
   answer?: string;
   sql?: string | null;
   rows?: Row[] | null;
@@ -24,7 +25,14 @@ export type Turn = {
   intentType?: "query" | "destructive" | "out_of_scope" | "system_access" | "data_unavailable" | null;
   stageTimings?: Record<string, number>;
   stageTokens?: Record<string, StageTokens>;
-  liveStages?: Record<string, { status: StageStatus; durationMs?: number; startedAt?: number }>;
+  loading?: boolean;
+  liveStages?: LiveStages;
+};
+
+export type Turn = SubBlock & {
+  loading: boolean;
+  parentQuestion?: string;
+  blocks?: SubBlock[];
 };
 
 function borderColorForIntent(intent: Turn["intentType"], hasError: boolean | undefined): string {

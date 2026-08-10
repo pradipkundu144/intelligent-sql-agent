@@ -13,3 +13,6 @@ langchain-core==0.3.29
 sqlglot==26.0.1
 langfuse==2.60.0
 pgvector==0.3.6
+ragas==0.2.10
+langchain-openai==0.2.14
+datasets==3.2.0

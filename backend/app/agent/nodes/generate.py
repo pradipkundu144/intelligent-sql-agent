@@ -39,11 +39,18 @@ Attempt {attempt} of {max_attempts}. Produce a corrected SELECT that fixes the s
 async def generate(state: AgentState) -> AgentState:
     started = time.perf_counter()
     try:
-        try:
-            context = await get_context(state["question"])
-        except Exception as exc:
-            logger.warning("rag.retrieve failed, continuing without context: %s", exc)
-            context = RetrievedContext()
+        cached = state.get("retrieved_context")
+        if cached is not None:
+            context = RetrievedContext(
+                few_shots=[tuple(s) for s in cached.get("few_shots", [])],
+                column_docs=[tuple(d) for d in cached.get("column_docs", [])],
+            )
+        else:
+            try:
+                context = await get_context(state["question"])
+            except Exception as exc:
+                logger.warning("rag.retrieve failed, continuing without context: %s", exc)
+                context = RetrievedContext()
 
         correction = ""
         if state.get("error") and state.get("sql"):

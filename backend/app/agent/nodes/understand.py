@@ -1,11 +1,15 @@
+import logging
 import time
 from typing import Literal
 
 from pydantic import BaseModel
 
 from ...llm import chat_json
+from ...rag.retrieve import RetrievedContext, get_context
 from ..prompts import SCHEMA_DDL
 from ..state import AgentState
+
+logger = logging.getLogger(__name__)
 
 
 class _IntentResult(BaseModel):
@@ -22,6 +26,7 @@ The agent is READ-ONLY. It can answer questions about customers, products,
 orders, and order items using ONLY the columns shown in the schema below.
 
 {schema}
+{column_notes}{intent_examples}
 
 Classify the input into one of five categories:
 
@@ -94,9 +99,25 @@ Return:
 async def understand(state: AgentState) -> AgentState:
     started = time.perf_counter()
     try:
+        try:
+            context = await get_context(state["question"])
+        except Exception as exc:
+            logger.warning("rag.retrieve failed in understand, continuing without context: %s", exc)
+            context = RetrievedContext()
+
+        state["retrieved_context"] = {
+            "few_shots": list(context.few_shots),
+            "column_docs": list(context.column_docs),
+        }
+
         usage_sink = state.setdefault("stage_tokens", {}).setdefault("understand", {})
         result = await chat_json(
-            PROMPT.format(schema=SCHEMA_DDL, question=state["question"]),
+            PROMPT.format(
+                schema=SCHEMA_DDL,
+                column_notes=_format_column_notes(context),
+                intent_examples=_format_intent_examples(context),
+                question=state["question"],
+            ),
             schema=_IntentResult,
             model="gpt-4o-mini",
             trace_id=state.get("trace_id"),
@@ -113,3 +134,30 @@ async def understand(state: AgentState) -> AgentState:
     finally:
         state.setdefault("stage_timings", {})["understand"] = int((time.perf_counter() - started) * 1000)
     return state
+
+
+def _format_column_notes(context: RetrievedContext) -> str:
+    if not context.column_docs:
+        return ""
+    lines = [
+        f"- {table}.{column}: {description}"
+        for table, column, description in context.column_docs
+    ]
+    return "\nRelevant column notes:\n" + "\n".join(lines) + "\n"
+
+
+def _format_intent_examples(context: RetrievedContext) -> str:
+    if not context.few_shots:
+        return ""
+    lines = [f'- "{question}"' for question, _sql in context.few_shots]
+    return (
+        "\nExamples of well-formed queries the agent has answered before — "
+        "each has a clear SUBJECT (customers / products / orders / order_items) "
+        "AND a clear metric, filter, or aggregation. Use them as reinforcement "
+        "only when the user's question ALSO has a clear subject AND clear ask. "
+        "Vague, subject-less, or metric-less questions ('the good ones', "
+        "'show me stuff') should still be classified as out_of_scope, no matter "
+        "how similar they sound to these examples.\n"
+        + "\n".join(lines)
+        + "\n"
+    )

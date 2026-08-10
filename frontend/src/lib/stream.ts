@@ -1,7 +1,9 @@
 export type StreamEvent =
-  | { type: "stage_start"; stage: string; t: number }
-  | { type: "stage_end"; stage: string; t: number }
-  | { type: "explain_token"; token: string }
+  | { type: "parent_start"; parent_question: string; subquestions: string[]; t: number }
+  | { type: "stage_start"; stage: string; t: number; sub?: number }
+  | { type: "stage_end"; stage: string; t: number; sub?: number }
+  | { type: "explain_token"; token: string; sub?: number }
+  | { type: "sub_done"; sub: number; payload: Record<string, unknown> }
   | { type: "done"; payload: Record<string, unknown> }
   | { type: "error"; message: string };
 
