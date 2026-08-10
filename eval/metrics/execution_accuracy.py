@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Awaitable, Callable, Optional
 
 from app.agent.graph import graph
+
+
+OnCase = Optional[Callable[["CaseResult"], Awaitable[None]]]
 
 
 @dataclass
@@ -98,7 +101,7 @@ def _assert(state: dict, expected: dict) -> tuple[bool, str]:
     return False, f"unknown assertion kind: {kind}"
 
 
-async def run(dataset: list[dict]) -> MetricResult:
+async def run(dataset: list[dict], on_case: OnCase = None) -> MetricResult:
     result = MetricResult(total=len(dataset))
     g = graph()
 
@@ -138,5 +141,7 @@ async def run(dataset: list[dict]) -> MetricResult:
         if case.passed:
             result.passed += 1
         result.cases.append(case)
+        if on_case:
+            await on_case(case)
 
     return result

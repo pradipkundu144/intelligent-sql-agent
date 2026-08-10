@@ -458,3 +458,128 @@ async def query_stream(req: QueryRequest):
             "Connection": "keep-alive",
         },
     )
+
+
+import json as _json_mod  # noqa: E402
+from dataclasses import asdict as _dc_asdict  # noqa: E402
+from datetime import datetime as _dt, timezone as _tz  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
+_EVAL_LOCK = asyncio.Lock()
+
+
+@app.post("/eval/run")
+async def eval_run():
+    """Streams evaluation progress as SSE. One run at a time (lock enforced)."""
+    if _EVAL_LOCK.locked():
+        return StreamingResponse(
+            iter([f"data: {json.dumps({'type': 'error', 'message': 'eval already running'})}\n\n"]),
+            media_type="text/event-stream",
+            status_code=409,
+        )
+
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def run_eval() -> None:
+        async with _EVAL_LOCK:
+            try:
+                from eval.metrics import (
+                    execution_accuracy,
+                    graceful_handling,
+                    guardrail_catch,
+                    ragas_faithfulness,
+                )
+
+                dataset_dir = _Path("/app/eval/dataset")
+                results_dir = _Path("/app/eval/results")
+                positive = _json_mod.loads((dataset_dir / "positive.json").read_text())
+                negative = _json_mod.loads((dataset_dir / "negative.json").read_text())
+                neutral = _json_mod.loads((dataset_dir / "neutral.json").read_text())
+
+                metrics_spec = [
+                    ("execution_accuracy", execution_accuracy.run, positive),
+                    ("guardrail_catch", guardrail_catch.run, negative),
+                    ("graceful_handling", graceful_handling.run, neutral),
+                    ("ragas", ragas_faithfulness.run, positive),
+                ]
+
+                await queue.put({
+                    "type": "eval_start",
+                    "metrics": [
+                        {"name": name, "total": len(ds)}
+                        for name, _, ds in metrics_spec
+                    ],
+                    "t": int(time.time() * 1000),
+                })
+
+                metric_results = []
+                for name, fn, ds in metrics_spec:
+                    await queue.put({
+                        "type": "metric_start",
+                        "metric": name,
+                        "total": len(ds),
+                        "t": int(time.time() * 1000),
+                    })
+
+                    async def _on_case(case, metric_name=name):
+                        await queue.put({
+                            "type": "case_end",
+                            "metric": metric_name,
+                            "case": _dc_asdict(case),
+                            "t": int(time.time() * 1000),
+                        })
+
+                    result = await fn(ds, on_case=_on_case)
+                    metric_results.append(result)
+
+                    payload_extras = {}
+                    if hasattr(result, "faithfulness_mean"):
+                        payload_extras["faithfulness_mean"] = result.faithfulness_mean
+                        payload_extras["answer_relevancy_mean"] = result.answer_relevancy_mean
+
+                    await queue.put({
+                        "type": "metric_end",
+                        "metric": name,
+                        "passed": result.passed,
+                        "total": result.total,
+                        "rate": result.rate,
+                        **payload_extras,
+                        "t": int(time.time() * 1000),
+                    })
+
+                out = {
+                    "ran_at": _dt.now(_tz.utc).isoformat(),
+                    "metrics": [_dc_asdict(r) for r in metric_results],
+                }
+                results_dir.mkdir(exist_ok=True)
+                (results_dir / "latest.json").write_text(_json_mod.dumps(out, indent=2, default=str))
+
+                await queue.put({
+                    "type": "eval_end",
+                    "results": out,
+                    "t": int(time.time() * 1000),
+                })
+            except Exception as exc:
+                logger.exception("eval_run failed")
+                await queue.put({"type": "error", "message": str(exc)})
+            finally:
+                await queue.put(None)
+
+    asyncio.create_task(run_eval())
+
+    async def sse_gen():
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            yield f"data: {json.dumps(jsonable_encoder(event))}\n\n"
+
+    return StreamingResponse(
+        sse_gen(),
+        media_type="text/event-stream",
+        headers={
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )

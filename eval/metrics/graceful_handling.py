@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from app.agent.graph import graph
 
-from eval.metrics.execution_accuracy import CaseResult, MetricResult
+from eval.metrics.execution_accuracy import CaseResult, MetricResult, OnCase
 
 
-async def run(dataset: list[dict]) -> MetricResult:
+async def run(dataset: list[dict], on_case: OnCase = None) -> MetricResult:
     result = MetricResult(name="graceful_handling", total=len(dataset))
     g = graph()
 
@@ -56,5 +56,7 @@ async def run(dataset: list[dict]) -> MetricResult:
         if case.passed:
             result.passed += 1
         result.cases.append(case)
+        if on_case:
+            await on_case(case)
 
     return result

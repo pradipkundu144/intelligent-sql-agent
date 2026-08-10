@@ -13,7 +13,7 @@ from ragas.metrics import AnswerRelevancy, Faithfulness
 from app.agent.graph import graph
 from app.config import get_settings
 
-from eval.metrics.execution_accuracy import CaseResult, MetricResult
+from eval.metrics.execution_accuracy import CaseResult, MetricResult, OnCase
 
 
 JUDGE_MODEL = "gpt-4o-mini"
@@ -45,7 +45,7 @@ def _build_contexts(question: str, sql: str | None, rows: list[dict], limit: int
     return contexts
 
 
-async def run(dataset: list[dict]) -> RagasMetricResult:
+async def run(dataset: list[dict], on_case: OnCase = None) -> RagasMetricResult:
     settings = get_settings()
     judge_llm = LangchainLLMWrapper(
         ChatOpenAI(model=JUDGE_MODEL, temperature=0, api_key=settings.llm_api_key)
@@ -65,16 +65,17 @@ async def run(dataset: list[dict]) -> RagasMetricResult:
         state = await g.ainvoke({"question": entry["question"], "attempt_count": 1})
 
         if state.get("error") or state.get("intent_type") != "query" or not state.get("answer"):
-            result.cases.append(
-                RagasCaseResult(
-                    id=entry["id"],
-                    category=entry.get("category", ""),
-                    question=entry["question"],
-                    passed=False,
-                    reason="skipped — no answer to score (agent blocked or errored)",
-                    sql=state.get("sql"),
-                )
+            case: RagasCaseResult = RagasCaseResult(
+                id=entry["id"],
+                category=entry.get("category", ""),
+                question=entry["question"],
+                passed=False,
+                reason="skipped — no answer to score (agent blocked or errored)",
+                sql=state.get("sql"),
             )
+            result.cases.append(case)
+            if on_case:
+                await on_case(case)
             continue
 
         sample = SingleTurnSample(
@@ -89,16 +90,17 @@ async def run(dataset: list[dict]) -> RagasMetricResult:
             faith = float(await faithfulness.single_turn_ascore(sample))
             rel = float(await answer_relevancy.single_turn_ascore(sample))
         except Exception as exc:
-            result.cases.append(
-                RagasCaseResult(
-                    id=entry["id"],
-                    category=entry.get("category", ""),
-                    question=entry["question"],
-                    passed=False,
-                    reason=f"ragas error: {exc}",
-                    sql=state.get("sql"),
-                )
+            case = RagasCaseResult(
+                id=entry["id"],
+                category=entry.get("category", ""),
+                question=entry["question"],
+                passed=False,
+                reason=f"ragas error: {exc}",
+                sql=state.get("sql"),
             )
+            result.cases.append(case)
+            if on_case:
+                await on_case(case)
             continue
 
         faith_scores.append(faith)
@@ -106,19 +108,20 @@ async def run(dataset: list[dict]) -> RagasMetricResult:
         passed = faith >= 0.80 and rel >= 0.80
         if passed:
             result.passed += 1
-        result.cases.append(
-            RagasCaseResult(
-                id=entry["id"],
-                category=entry.get("category", ""),
-                question=entry["question"],
-                passed=passed,
-                reason=f"faithfulness={faith:.2f}, answer_relevancy={rel:.2f}",
-                sql=state.get("sql"),
-                row_count=len(state.get("rows") or []),
-                faithfulness=faith,
-                answer_relevancy=rel,
-            )
+        case = RagasCaseResult(
+            id=entry["id"],
+            category=entry.get("category", ""),
+            question=entry["question"],
+            passed=passed,
+            reason=f"faithfulness={faith:.2f}, answer_relevancy={rel:.2f}",
+            sql=state.get("sql"),
+            row_count=len(state.get("rows") or []),
+            faithfulness=faith,
+            answer_relevancy=rel,
         )
+        result.cases.append(case)
+        if on_case:
+            await on_case(case)
 
     if faith_scores:
         result.faithfulness_mean = sum(faith_scores) / len(faith_scores)
