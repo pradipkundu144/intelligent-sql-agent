@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import Logo from "../components/Logo";
 import EvaluationTab from "./EvaluationTab";
 import ArchitectureTab from "./ArchitectureTab";
+import { ENABLE_EVAL_TAB } from "../config/features";
 
 type TabKey = "evaluation" | "architecture";
 
 function tabFromHash(): TabKey {
+  if (!ENABLE_EVAL_TAB) return "architecture";
   const h = window.location.hash.replace("#", "").toLowerCase();
   return h === "architecture" ? "architecture" : "evaluation";
 }
@@ -56,9 +58,11 @@ export default function DashboardPage() {
           </a>
         </div>
         <div className="mx-auto flex w-full max-w-none gap-1 px-4">
-          <TabButton active={tab === "evaluation"} onClick={() => switchTab("evaluation")}>
-            Evaluation
-          </TabButton>
+          {ENABLE_EVAL_TAB && (
+            <TabButton active={tab === "evaluation"} onClick={() => switchTab("evaluation")}>
+              Evaluation
+            </TabButton>
+          )}
           <TabButton active={tab === "architecture"} onClick={() => switchTab("architecture")}>
             Architecture
           </TabButton>
@@ -67,7 +71,7 @@ export default function DashboardPage() {
 
       <main className="relative z-10 flex-1">
         <div className="mx-auto w-full max-w-none px-4 py-6">
-          {tab === "evaluation" && <EvaluationTab />}
+          {ENABLE_EVAL_TAB && tab === "evaluation" && <EvaluationTab />}
           {tab === "architecture" && <ArchitectureTab />}
         </div>
       </main>

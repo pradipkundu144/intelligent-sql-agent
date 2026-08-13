@@ -5,6 +5,8 @@ import AnswerCard, { type LiveStages, type SubBlock, type Turn } from "../compon
 import MultiBlock from "../components/MultiBlock";
 import UserBubble from "../components/UserBubble";
 import ProgressPill from "../components/ProgressPill";
+import WelcomeModal, { hasSeenWelcome, markWelcomeSeen } from "../components/WelcomeModal";
+import ServiceBanner from "../components/ServiceBanner";
 import { streamQuery } from "../lib/stream";
 import { smoothScrollTo } from "../lib/scroll";
 import type { StageStatus } from "../components/StageProgress";
@@ -86,6 +88,8 @@ function mapBlock(raw: Record<string, unknown>): SubBlock {
 
 export default function ChatPage() {
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [showWelcome, setShowWelcome] = useState(() => !hasSeenWelcome());
+  const [serviceAvailable, setServiceAvailable] = useState(true);
   const anyLoading = turns.some((t) => t.loading);
   const bottomRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
@@ -98,6 +102,26 @@ export default function ChatPage() {
     return smoothScrollTo(main, target, 250);
   }, [turns.length]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/health`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setServiceAvailable(data.service_available !== false);
+      } catch {
+        // network hiccup — keep current state, don't false-alarm
+      }
+    };
+    check();
+    const id = setInterval(check, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
   const updateTurn = (index: number, update: Partial<Turn> | ((prev: Turn) => Partial<Turn>)) => {
     setTurns((prev) =>
       prev.map((t, i) => {
@@ -109,6 +133,7 @@ export default function ChatPage() {
   };
 
   const handleSubmit = async (question: string) => {
+    if (!serviceAvailable) return;
     const index = turns.length;
     setTurns((prev) => [
       ...prev,
@@ -253,6 +278,14 @@ export default function ChatPage() {
 
   return (
     <div className="relative flex h-full flex-col bg-slate-950">
+      {showWelcome && (
+        <WelcomeModal
+          onClose={() => {
+            markWelcomeSeen();
+            setShowWelcome(false);
+          }}
+        />
+      )}
       <div className="ambient-layer" aria-hidden>
         <div className="ambient-blob ambient-blob-a" />
         <div className="ambient-blob ambient-blob-b" />
@@ -260,6 +293,7 @@ export default function ChatPage() {
       </div>
       <div className="relative z-10">
         <Header />
+        {!serviceAvailable && <ServiceBanner />}
       </div>
       <main ref={mainRef} className="relative z-10 flex-1 overflow-y-auto overflow-x-hidden">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-6">
@@ -302,7 +336,7 @@ export default function ChatPage() {
           inlineExamples={INLINE_EXAMPLES}
           extraGroups={EXTRA_EXAMPLE_GROUPS}
           onSubmit={handleSubmit}
-          disabled={anyLoading}
+          disabled={anyLoading || !serviceAvailable}
         />
       </div>
     </div>

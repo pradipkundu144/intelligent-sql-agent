@@ -1,3 +1,5 @@
+import { authHeaders } from "./api";
+
 export type EvalCase = {
   id: string;
   category?: string;
@@ -32,7 +34,7 @@ export type EvalEvent =
 export async function* streamEval(baseUrl: string): AsyncGenerator<EvalEvent, void, unknown> {
   const response = await fetch(`${baseUrl}/eval/run`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
   });
 
   if (!response.ok || !response.body) {

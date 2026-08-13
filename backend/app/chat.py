@@ -6,6 +6,7 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from .config import get_settings
 
 _client: AsyncIOMotorClient | None = None
+_service_state: bool = True
 
 
 def _db() -> AsyncIOMotorDatabase:
@@ -38,6 +39,27 @@ async def save_turn(
             "created_at": datetime.now(timezone.utc),
         }
     )
+
+
+def get_service_state() -> bool:
+    return _service_state
+
+
+async def load_service_state() -> None:
+    global _service_state
+    doc = await _db().settings.find_one({"_id": "service_state"})
+    if doc is not None and doc.get("available") is not None:
+        _service_state = bool(doc["available"])
+
+
+async def set_service_state(available: bool) -> None:
+    global _service_state
+    await _db().settings.update_one(
+        {"_id": "service_state"},
+        {"$set": {"available": available, "updated_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    _service_state = available
 
 
 async def close() -> None:

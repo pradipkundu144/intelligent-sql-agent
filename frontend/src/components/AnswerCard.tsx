@@ -35,7 +35,19 @@ export type Turn = SubBlock & {
   blocks?: SubBlock[];
 };
 
-function borderColorForIntent(intent: Turn["intentType"], hasError: boolean | undefined): string {
+function isSystemNotice(error: string | null | undefined): boolean {
+  if (!error) return false;
+  const s = error.toLowerCase();
+  return (
+    s.includes("request limit") ||
+    s.includes("temporarily unavailable") ||
+    s.includes("authorised") ||
+    s.includes("authorized")
+  );
+}
+
+function borderColorForIntent(intent: Turn["intentType"], hasError: boolean | undefined, systemNotice: boolean = false): string {
+  if (systemNotice) return "border-l-amber-500/70";
   if (hasError) return "border-l-red-500/70";
   switch (intent) {
     case "destructive":
@@ -91,7 +103,8 @@ export default function AnswerCard({ turn }: { turn: Turn }) {
 
   const sampleCount = rows?.length ?? 0;
   const showRowsTable = !loading && rows && rows.length > 0;
-  const borderColor = borderColorForIntent(intentType, !!error);
+  const systemNotice = isSystemNotice(error);
+  const borderColor = borderColorForIntent(intentType, !!error, systemNotice);
   const statusLabel = statusLabelForIntent(intentType);
 
 
@@ -148,9 +161,21 @@ export default function AnswerCard({ turn }: { turn: Turn }) {
       )}
 
       {!loading && error && (
-        <p className="mt-3 rounded border border-red-900/40 bg-red-950/40 p-2 font-mono text-[11px] text-red-300">
-          {error}
-        </p>
+        <div
+          className={`mt-3 flex items-center gap-2.5 rounded border p-2.5 text-[12px] leading-relaxed ${
+            systemNotice
+              ? "border-amber-900/50 bg-amber-950/30 text-amber-200"
+              : "border-red-900/40 bg-red-950/40 font-mono text-[11px] text-red-300"
+          }`}
+        >
+          {systemNotice && (
+            <span
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500 shadow-[0_0_6px_rgb(245_158_11/0.6)]"
+              aria-hidden
+            />
+          )}
+          <span>{error}</span>
+        </div>
       )}
 
       {!loading && overflow && totalRowCount != null && (

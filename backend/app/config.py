@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     langfuse_host: str = "https://cloud.langfuse.com"
     langfuse_project_id: str | None = None
 
+    admin_token: str | None = None
+    api_token: str | None = None
+
+    cors_origins: str = "http://localhost:5173"
+
     framework: str = "langgraph"
 
     @property

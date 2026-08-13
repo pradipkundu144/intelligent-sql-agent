@@ -4,11 +4,13 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
 
 from . import business_db, chat
 from .agent.decompose import decompose
@@ -31,19 +33,42 @@ async def lifespan(app: FastAPI):
         await rag_ingest.run()
     except Exception as exc:
         logger.warning("rag.ingest failed at startup, continuing without RAG data: %s", exc)
+    try:
+        await chat.load_service_state()
+    except Exception as exc:
+        logger.warning("could not load service state, defaulting to available: %s", exc)
     yield
     await chat.close()
     await business_db.close()
 
 
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+limiter = Limiter(key_func=_client_ip)
+
+
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Too many requests. Please wait a bit and try again."},
+    )
+
+
 app = FastAPI(title="Intelligent SQL AI Agent", version="0.1.0", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[o.strip() for o in get_settings().cors_origins.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-API-Key"],
 )
 
 
@@ -51,12 +76,48 @@ class QueryRequest(BaseModel):
     question: str
 
 
+class ServiceStateRequest(BaseModel):
+    available: bool
+
+
+async def require_admin(authorization: str = Header(default="")) -> None:
+    settings = get_settings()
+    if not settings.admin_token:
+        raise HTTPException(status_code=503, detail="admin endpoints not configured")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    token = authorization[7:]
+    if token != settings.admin_token:
+        raise HTTPException(status_code=401, detail="invalid token")
+
+
+async def require_api_token(x_api_key: str = Header(default="")) -> None:
+    settings = get_settings()
+    if not settings.api_token:
+        raise HTTPException(status_code=503, detail="api not configured")
+    if x_api_key != settings.api_token:
+        raise HTTPException(status_code=401, detail="invalid or missing api key")
+
+
 @app.get("/health")
 async def health():
     postgres_ok = await business_db.ping()
     mongo_ok = await chat.ping()
     status = "ok" if (postgres_ok and mongo_ok) else "degraded"
-    return {"status": status, "postgres": postgres_ok, "mongodb": mongo_ok}
+    return {
+        "status": status,
+        "postgres": postgres_ok,
+        "mongodb": mongo_ok,
+        "service_available": chat.get_service_state(),
+    }
+
+
+@app.post("/admin/service-state")
+async def admin_set_service_state(
+    req: ServiceStateRequest, _: None = Depends(require_admin)
+):
+    await chat.set_service_state(req.available)
+    return {"service_available": req.available}
 
 
 def _outcome_from(result: dict) -> str:
@@ -147,7 +208,10 @@ def _flush_trace(trace, summary_output: dict) -> None:
 
 
 @app.post("/query")
-async def query(req: QueryRequest):
+@limiter.limit("20/hour;200/day")
+async def query(request: Request, req: QueryRequest, _: None = Depends(require_api_token)):
+    if not chat.get_service_state():
+        raise HTTPException(status_code=503, detail="service temporarily unavailable")
     subquestions = await decompose(req.question)
 
     if len(subquestions) == 1:
@@ -358,7 +422,10 @@ async def _stream_multi(parent_question: str, subquestions: list[str]):
 
 
 @app.post("/query/stream")
-async def query_stream(req: QueryRequest):
+@limiter.limit("20/hour;200/day")
+async def query_stream(request: Request, req: QueryRequest, _: None = Depends(require_api_token)):
+    if not chat.get_service_state():
+        raise HTTPException(status_code=503, detail="service temporarily unavailable")
     subquestions = await decompose(req.question)
 
     if len(subquestions) > 1:
@@ -469,7 +536,8 @@ _EVAL_LOCK = asyncio.Lock()
 
 
 @app.post("/eval/run")
-async def eval_run():
+@limiter.limit("1/hour;3/day")
+async def eval_run(request: Request):
     """Streams evaluation progress as SSE. One run at a time (lock enforced)."""
     if _EVAL_LOCK.locked():
         return StreamingResponse(

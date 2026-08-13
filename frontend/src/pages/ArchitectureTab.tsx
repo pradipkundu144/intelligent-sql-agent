@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -135,12 +136,20 @@ const MIN_STAGE_DWELL_MS = 900;
 
 export default function ArchitectureTab() {
   const [selected, setSelected] = useState<ExampleQuery | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const initial = useMemo(() => buildSingleLayout(), []);
   const [nodes, setNodes] = useState<Node<PipelineNodeData>[]>(initial.nodes);
   const [edges, setEdges] = useState<Edge[]>(initial.edges);
   const [detail, setDetail] = useState<DetailState>(EMPTY_DETAIL);
   const [running, setRunning] = useState(false);
   const stageStartedAt = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setIsFullscreen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isFullscreen]);
 
   const reset = useCallback(() => {
     const fresh = buildSingleLayout();
@@ -215,6 +224,7 @@ export default function ArchitectureTab() {
   const runQuery = useCallback(
     async (q: ExampleQuery) => {
       if (running) return;
+      setIsFullscreen(true);
       stageStartedAt.current = {};
       const fresh = buildSingleLayout();
       setNodes(fresh.nodes);
@@ -458,6 +468,51 @@ export default function ArchitectureTab() {
 
       <QuerySelector selected={selected} disabled={running} onPick={runQuery} onReset={reset} />
 
+      {isFullscreen && createPortal(
+        <div className="fixed inset-0 z-[9999] flex flex-col bg-slate-950 animate-[fadeIn_180ms_ease-out]">
+          <div className="flex shrink-0 items-center justify-between border-b border-slate-800 px-6 py-3">
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                architecture · fullscreen
+              </span>
+              {selected && (
+                <span className="font-mono text-[12px] text-slate-300">{selected.question}</span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsFullscreen(false)}
+              className="rounded-md border border-slate-800 bg-slate-900 px-3 py-1.5 font-mono text-[11px] text-slate-400 transition-colors hover:border-slate-600 hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+            >
+              Close ✕
+            </button>
+          </div>
+          <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 p-4 xl:grid-cols-[1fr_400px]">
+            <div className="min-h-0 overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60">
+              <ReactFlowProvider>
+                <ReactFlow
+                  nodes={rfNodes}
+                  edges={rfEdges}
+                  nodeTypes={NODE_TYPES}
+                  nodesDraggable={false}
+                  nodesConnectable={false}
+                  zoomOnScroll={false}
+                  panOnScroll
+                  fitView
+                  fitViewOptions={{ padding: 0.15 }}
+                  proOptions={{ hideAttribution: true }}
+                >
+                  <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#1e293b" />
+                  <Controls showInteractive={false} />
+                </ReactFlow>
+              </ReactFlowProvider>
+            </div>
+            <DetailPanel detail={detail} />
+          </div>
+        </div>,
+        document.body
+      )}
+
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_400px]">
         <div className="h-[760px] overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60">
           <ReactFlowProvider>
@@ -481,6 +536,7 @@ export default function ArchitectureTab() {
 
         <DetailPanel detail={detail} />
       </div>
+
     </div>
   );
 }

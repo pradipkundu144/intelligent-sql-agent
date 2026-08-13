@@ -10,8 +10,6 @@ services:
     command: >
       postgres
       -c agent.readonly_password=${DB_READONLY_PASSWORD}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db:/docker-entrypoint-initdb.d:ro
@@ -25,8 +23,6 @@ services:
     image: mongo:7
     container_name: sql-agent-mongodb
     restart: unless-stopped
-    ports:
-      - "27017:27017"
     volumes:
       - mongo_data:/data/db
     healthcheck:
@@ -64,6 +60,7 @@ services:
       - backend
     environment:
       VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+      VITE_API_TOKEN: ${VITE_API_TOKEN}
     ports:
       - "5173:5173"
     volumes:
